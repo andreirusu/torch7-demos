@@ -21,6 +21,7 @@ require 'nnx'
 require 'optim'
 require 'image'
 require './GainNoise'
+require 'nnd'
 
 ----------------------------------------------------------------------
 -- parse command-line options
@@ -36,6 +37,10 @@ cmd:option('-network', '', 'reload pretrained network')
 cmd:option('-model', 'convnet', 'type of model to train: convnet | mlp | linear')
 cmd:option('-full', false, 'use full dataset (50,000 samples)')
 cmd:option('-visualize', false, 'visualize input data and weights during training')
+cmd:option('-trainNoise', false, 'enable noise during training')
+cmd:option('-trainNoiseLevel', 10, 'noise level during training')
+cmd:option('-testNoise', false, 'enable noise during testing')
+cmd:option('-testNoiseLevel', 10, 'noise level during testing')
 cmd:option('-seed', 1, 'fixed input seed for repeatable experiments')
 cmd:option('-optimization', 'SGD', 'optimization method: SGD | ASGD | CG | LBFGS')
 cmd:option('-learningRate', 1e-3, 'learning rate at t=0')
@@ -72,17 +77,17 @@ if opt.network == '' then
       ------------------------------------------------------------
       -- stage 1 : mean+std normalization -> filter bank -> squashing -> max pooling
       model:add(nn.SpatialConvolutionMap(nn.tables.random(3,16,1), 5, 5))
-      model:add(nn.Tanh())
+      model:add(nnd.Rectifier())
       model:add(nn.SpatialMaxPooling(2, 2, 2, 2))
       -- stage 2 : filter bank -> squashing -> max pooling
       model:add(nn.SpatialConvolutionMap(nn.tables.random(16, 256, 4), 5, 5))
-      model:add(nn.Tanh())
+      model:add(nnd.Rectifier())
       model:add(nn.SpatialMaxPooling(2, 2, 2, 2))
       -- stage 3 : standard 2-layer neural network
       model:add(nn.Reshape(256*5*5))
       model:add(nn.Linear(256*5*5, 128))
-      model:add(nn.Tanh())
-      model:add(nn.GainNoise(0.01))
+      model:add(nn.GainNoise(0))
+      model:add(nnd.Rectifier())
       model:add(nn.Linear(128,#classes))
       ------------------------------------------------------------
 
@@ -360,8 +365,10 @@ function train(dataset)
    print("<trainer> time to learn 1 sample = " .. (time*1000) .. 'ms')
 
    -- print confusion matrix
-   print(confusion)
+   --print(confusion)
+   confusion:updateValids()
    trainLogger:add{['% mean class accuracy (train set)'] = confusion.totalValid * 100}
+   print('Mean Accuracy: ' .. (confusion.totalValid * 100))
    confusion:zero()
 
    -- save/log current net
@@ -409,8 +416,10 @@ function test(dataset)
    print("<trainer> time to test 1 sample = " .. (time*1000) .. 'ms')
 
    -- print confusion matrix
-   print(confusion)
+   --print(confusion)
+   confusion:updateValids()
    testLogger:add{['% mean class accuracy (test set)'] = confusion.totalValid * 100}
+   print('Mean Accuracy: ' .. (confusion.totalValid * 100))
    confusion:zero()
 
    -- averaged param use?
@@ -421,12 +430,35 @@ function test(dataset)
 end
 
 ----------------------------------------------------------------------
--- and train!
---
+    
+print('\n\nTEST:\n')
+   
+model:get(9):setSigma(opt.testNoiseLevel)
+model:get(9):setEnabled(opt.testNoise)
+print(model:get(9))
+test(testData)
+test(testData)
+test(testData)
+
 while true do
-   -- train/test
-   train(trainData)
-   test(testData)
+    
+    print('\n\nTRAININIG:\n')
+    
+    -- train
+    model:get(9):setSigma(opt.trainNoiseLevel)
+    model:get(9):setEnabled(opt.trainNoise)
+    print(model:get(9))
+    train(trainData)
+    
+    print('\n\nTEST:\n')
+   
+    -- test
+    model:get(9):setSigma(opt.testNoiseLevel)
+    model:get(9):setEnabled(opt.testNoise)
+    print(model:get(9))
+    test(testData)
+    test(testData)
+    test(testData)
 
    -- plot errors
    trainLogger:style{['% mean class accuracy (train set)'] = '-'}
