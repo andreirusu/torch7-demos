@@ -20,6 +20,7 @@ require 'nn'
 require 'nnx'
 require 'optim'
 require 'image'
+require './GainNoise'
 
 ----------------------------------------------------------------------
 -- parse command-line options
@@ -81,6 +82,7 @@ if opt.network == '' then
       model:add(nn.Reshape(256*5*5))
       model:add(nn.Linear(256*5*5, 128))
       model:add(nn.Tanh())
+      model:add(nn.GainNoise(0.01))
       model:add(nn.Linear(128,#classes))
       ------------------------------------------------------------
 
@@ -234,13 +236,13 @@ testLogger = optim.Logger(paths.concat(opt.save, 'test.log'))
 function display(input)
    iter = iter or 0
    require 'image'
-   win_input = image.display{image=input, win=win_input, zoom=2, legend='input'}
-   if iter%10 == 0 then
+   if iter%100 == 0 then
       if opt.model == 'convnet' then
-         win_w1 = image.display{image=model:get(2).weight, zoom=4, nrow=10,
+         win_input = image.display{image=input, win=win_input, zoom=2, legend='input'}
+         win_w1 = image.display{image=model:get(1).weight, zoom=4, nrow=10,
                                 min=-1, max=1,
                                 win=win_w1, legend='stage 1: weights', padding=1}
-         win_w2 = image.display{image=model:get(6).weight, zoom=4, nrow=30,
+         win_w2 = image.display{image=model:get(4).weight, zoom=4, nrow=30,
                                 min=-1, max=1,
                                 win=win_w2, legend='stage 2: weights', padding=1}
       elseif opt.model == 'mlp' then
@@ -429,6 +431,6 @@ while true do
    -- plot errors
    trainLogger:style{['% mean class accuracy (train set)'] = '-'}
    testLogger:style{['% mean class accuracy (test set)'] = '-'}
-   trainLogger:plot()
-   testLogger:plot()
+   --trainLogger:plot()
+   --testLogger:plot()
 end
