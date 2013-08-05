@@ -357,8 +357,10 @@ function train(dataset)
    print("<trainer> time to learn 1 sample = " .. (time*1000) .. 'ms')
 
    -- print confusion matrix
-   print(confusion)
+   --print(confusion)
+   confusion:updateValids()
    trainLogger:add{['% mean class accuracy (train set)'] = confusion.totalValid * 100}
+   print('Mean Accuracy: ' .. confusion.totalValid * 100)
    confusion:zero()
 
    -- save/log current net
@@ -406,8 +408,10 @@ function test(dataset)
    print("<trainer> time to test 1 sample = " .. (time*1000) .. 'ms')
 
    -- print confusion matrix
-   print(confusion)
+   --print(confusion)
    testLogger:add{['% mean class accuracy (test set)'] = confusion.totalValid * 100}
+   confusion:updateValids()
+   print('Mean Accuracy: ' .. confusion.totalValid * 100)
    confusion:zero()
 
    -- averaged param use?
