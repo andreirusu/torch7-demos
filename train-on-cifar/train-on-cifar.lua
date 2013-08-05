@@ -432,6 +432,6 @@ while true do
    -- plot errors
    trainLogger:style{['% mean class accuracy (train set)'] = '-'}
    testLogger:style{['% mean class accuracy (test set)'] = '-'}
-   trainLogger:plot()
-   testLogger:plot()
+   --trainLogger:plot()
+   --testLogger:plot()
 end
