@@ -20,7 +20,6 @@ require 'nn'
 require 'nnx'
 require 'optim'
 require 'image'
-require './GainNoise'
 
 ----------------------------------------------------------------------
 -- parse command-line options
@@ -38,10 +37,10 @@ cmd:option('-full', false, 'use full dataset (50,000 samples)')
 cmd:option('-visualize', false, 'visualize input data and weights during training')
 cmd:option('-seed', 1, 'fixed input seed for repeatable experiments')
 cmd:option('-optimization', 'SGD', 'optimization method: SGD | ASGD | CG | LBFGS')
-cmd:option('-learningRate', 1e-3, 'learning rate at t=0')
-cmd:option('-batchSize', 1, 'mini-batch size (1 = pure stochastic)')
+cmd:option('-learningRate', 1e-1, 'learning rate at t=0')
+cmd:option('-batchSize', 100, 'mini-batch size (1 = pure stochastic)')
 cmd:option('-weightDecay', 0, 'weight decay (SGD only)')
-cmd:option('-momentum', 0, 'momentum (SGD only)')
+cmd:option('-momentum', 0.95, 'momentum (SGD only)')
 cmd:option('-t0', 1, 'start averaging at t0 (ASGD only), in nb of epochs')
 cmd:option('-maxIter', 5, 'maximum nb of iterations for CG and LBFGS')
 cmd:option('-threads', 2, 'nb of threads to use')
@@ -80,10 +79,9 @@ if opt.network == '' then
       model:add(nn.SpatialMaxPooling(2, 2, 2, 2))
       -- stage 3 : standard 2-layer neural network
       model:add(nn.Reshape(256*5*5))
-      model:add(nn.Linear(256*5*5, 128))
+      model:add(nn.Linear(256*5*5, 3))
       model:add(nn.Tanh())
-      model:add(nn.GainNoise(0.01))
-      model:add(nn.Linear(128,#classes))
+      model:add(nn.Linear(3,#classes))
       ------------------------------------------------------------
 
    elseif opt.model == 'mlp' then
@@ -387,6 +385,8 @@ function test(dataset)
       cachedparams = parameters:clone()
       parameters:copy(average)
    end
+   
+   local file = io.open("dataset.txt", "w")
 
    -- test over given dataset
    print('<trainer> on testing Set:')
@@ -401,8 +401,11 @@ function test(dataset)
       -- test sample
       local pred = model:forward(input)
       confusion:add(pred, target)
+      rep = model:get(model:size() - 3).output
+      file:write(string.format("%d %f %f %f\n", target, rep[1], rep[2], rep[3]))
    end
-
+    
+   file:close()
    -- timing
    time = sys.clock() - time
    time = time / dataset:size()
