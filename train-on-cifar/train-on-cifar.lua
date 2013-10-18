@@ -22,6 +22,8 @@ require 'optim'
 require 'image'
 require 'nnd'
 
+local time = sys.clock() 
+
 ----------------------------------------------------------------------
 -- parse command-line options
 --
@@ -38,10 +40,10 @@ cmd:option('-visualize', false, 'visualize input data and weights during trainin
 cmd:option('-trainNoise', false, 'enable noise during training')
 cmd:option('-seed', 0, 'fixed input seed for repeatable experiments')
 cmd:option('-optimization', 'SGD', 'optimization method: SGD | ASGD | CG | LBFGS')
-cmd:option('-learningRate', 1e-3, 'learning rate at t=0')
-cmd:option('-batchSize', 1, 'mini-batch size (1 = pure stochastic)')
+cmd:option('-learningRate', 1e-4, 'learning rate at t=0')
+cmd:option('-mb', 1, 'mini-batch size (1 = pure stochastic)')
 cmd:option('-weightDecay', 0, 'weight decay (SGD only)')
-cmd:option('-momentum', 0.9, 'momentum (SGD only)')
+cmd:option('-momentum', 0.95, 'momentum (SGD only)')
 cmd:option('-t0', 1, 'start averaging at t0 (ASGD only), in nb of epochs')
 cmd:option('-maxIter', 5, 'maximum nb of iterations for CG and LBFGS')
 cmd:option('-epochs', math.huge, 'maximum nb of training epochs')
@@ -160,13 +162,12 @@ function nextBatch()
         currentBatchIndex = currentBatchIndex + 1
     end
     batch_name = 'cifar-10-batches-t7/proc.data_batch_'..batches[currentBatchIndex]
-    print("<trainer> loading: "..batch_name)
     currentBatch = torch.load(batch_name..'.t7', opt.format)
     currentBatch.data = currentBatch.data:type(torch.getdefaulttensortype())
     currentBatch.labels = currentBatch.labels:type(torch.getdefaulttensortype())
     collectgarbage()
     time = sys.clock() - time
-    print(string.format("<trainer> time to load batch = %.3f ms", time*1000))
+    print(string.format("<loader> new batch %s [ %.3fms ]", batch_name, time*1000))
     return currentBatch
 end
 
@@ -303,16 +304,14 @@ function train(batch)
       end
    end
    xlua.progress(batch.data:size(1), batch.data:size(1))
-
+   confusion:updateValids()
    -- time taken
    time = sys.clock() - time
-   print(string.format("<trainer> time to learn batch = %.3f ms", time*1000))
+   print(string.format("<trainer> batch accuracy: %.2f%%  [ %.3fms ]",confusion.totalValid * 100, time*1000))
 
    -- print confusion matrix
    --print(confusion)
-   confusion:updateValids()
    trainLogger:add{['% mean class accuracy (train set)'] = confusion.totalValid * 100}
-   print('<trainer> mean accuracy: ' .. (confusion.totalValid * 100)..'%')
    confusion:zero()
 
    
@@ -329,7 +328,7 @@ function saveModel()
     torch.save(filename, model)
 end
 
--- test functio
+-- test function
 function test(batch)
     if not batch then return nil end
     -- local vars
@@ -343,7 +342,6 @@ function test(batch)
 
 
     -- test over given batch
-    print('<trainer> on testing set:')
     for t = 1,batch.data:size(1) do
         -- disp progress
         xlua.progress(t, batch.data:size(1))
@@ -357,17 +355,17 @@ function test(batch)
         confusion:add(pred, target)
     end
     xlua.progress(batch.data:size(1), batch.data:size(1))
-
+    print(confusion)
+    
     -- timing
     time = sys.clock() - time
-    print(string.format("<trainer> time to test batch = %.3f ms", time*1000))
-    print(confusion)
+   print(string.format("<tester> batch accuracy: %.2f%%  [ %.3fms ]",confusion.totalValid * 100, time*1000))
+    
     -- visualize?
     if opt.visualize then
         image.display(confusion:render())
     end
     testLogger:add{['% mean class accuracy (test set)'] = confusion.totalValid * 100}
-    print('<trainer> mean accuracy: ' .. (confusion.totalValid * 100).."\n")
     confusion:zero()
 
     -- averaged param use?
@@ -390,24 +388,25 @@ while true do
     if epoch >= opt.epochs then 
         break 
     end
-    print("\n<trainer> starting epoch # "..epoch)
+    print("\n<trainer> epoch # " .. epoch .. ' [mb = ' .. opt.mb .. ']')
     
-    -- train
+    -- train model and save
     train(nextBatch())
     train(nextBatch())
     train(nextBatch())
     train(nextBatch())
-
-    -- test
-    test(nextBatch())
     saveModel() 
+
+    -- test model
+    test(nextBatch())
 
     -- plot errors
     trainLogger:style{['% mean class accuracy (train set)'] = '-'}
     testLogger:style{['% mean class accuracy (test set)'] = '-'}
     --trainLogger:plot()
     --testLogger:plot()
+    print("<trainer> finished epoch # "..epoch.."\n")
 end
 
-print "<trainer> success!"
+print(string.format("<trainer> success! [ %.3fh ]",confusion.totalValid * 100, (time - sys.clock())/3600))
 
