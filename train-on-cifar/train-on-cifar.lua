@@ -34,30 +34,44 @@ cmd:text('Options:')
 cmd:option('-save', fname:gsub('.lua',''), 'subdirectory to save/log experiments in')
 cmd:option('-network', '', 'reload pretrained network')
 cmd:option('-model', 'convnet', 'type of model to train: convnet | mlp | linear')
-cmd:option('-full', false, 'use full dataset (50,000 samples)')
 cmd:option('-visualize', false, 'visualize input data and weights during training')
 cmd:option('-trainNoise', false, 'enable noise during training')
-cmd:option('-trainNoiseLevel', 10, 'noise level during training')
-cmd:option('-testNoise', false, 'enable noise during testing')
-cmd:option('-testNoiseLevel', 10, 'noise level during testing')
-cmd:option('-seed', 1, 'fixed input seed for repeatable experiments')
+cmd:option('-seed', 0, 'fixed input seed for repeatable experiments')
 cmd:option('-optimization', 'SGD', 'optimization method: SGD | ASGD | CG | LBFGS')
-cmd:option('-learningRate', 1e-1, 'learning rate at t=0')
-cmd:option('-batchSize', 100, 'mini-batch size (1 = pure stochastic)')
+cmd:option('-learningRate', 1e-3, 'learning rate at t=0')
+cmd:option('-batchSize', 1, 'mini-batch size (1 = pure stochastic)')
 cmd:option('-weightDecay', 0, 'weight decay (SGD only)')
-cmd:option('-momentum', 0.95, 'momentum (SGD only)')
+cmd:option('-momentum', 0.9, 'momentum (SGD only)')
 cmd:option('-t0', 1, 'start averaging at t0 (ASGD only), in nb of epochs')
 cmd:option('-maxIter', 5, 'maximum nb of iterations for CG and LBFGS')
-cmd:option('-threads', 2, 'nb of threads to use')
+cmd:option('-epochs', math.huge, 'maximum nb of training epochs')
+cmd:option('-format', "binary", 'cached data format')
+cmd:option('-double', false, 'enable double precision')
+cmd:option('-threads', 1, 'nb of threads to use')
 cmd:text()
 opt = cmd:parse(arg)
 
+print('<trainer> options:')
+print(opt)
+
+
+
 -- fix seed
 torch.manualSeed(opt.seed)
+print('<torch> set seed to: '.. opt.seed)
 
 -- threads
 torch.setnumthreads(opt.threads)
-print('<torch> set nb of threads to ' .. opt.threads)
+print('<torch> set nb of threads to: ' .. opt.threads)
+
+-- set tensor precision
+if opt.double then
+    torch.setdefaulttensortype('torch.DoubleTensor')
+else 
+    torch.setdefaulttensortype('torch.FloatTensor')
+end
+print('<torch> set default Tensor type to: ' .. torch.getdefaulttensortype())
+
 
 ----------------------------------------------------------------------
 -- define model to train
@@ -79,14 +93,14 @@ if opt.network == '' then
       model:add(nnd.Rectifier())
       model:add(nn.SpatialMaxPooling(2, 2, 2, 2))
       -- stage 2 : filter bank -> squashing -> max pooling
-      model:add(nn.SpatialConvolutionMap(nn.tables.random(16, 256, 4), 5, 5))
+      model:add(nn.SpatialConvolutionMap(nn.tables.random(16, 32, 4), 5, 5))
       model:add(nnd.Rectifier())
       model:add(nn.SpatialMaxPooling(2, 2, 2, 2))
       -- stage 3 : standard 2-layer neural network
-      model:add(nn.Reshape(256*5*5))
-      model:add(nn.Linear(256*5*5, 128))
+      model:add(nn.Reshape(32*5*5))
+      model:add(nn.Linear(32*5*5, 32))
       model:add(nnd.Rectifier())
-      model:add(nn.Linear(128,#classes))
+      model:add(nn.Linear(32,#classes))
       ------------------------------------------------------------
 
    elseif opt.model == 'mlp' then
@@ -120,9 +134,6 @@ end
 -- retrieve parameters and gradients
 parameters,gradParameters = model:getParameters()
 
--- verbose
-print('<cifar> using model:')
-print(model)
 
 ----------------------------------------------------------------------
 -- loss function: negative log-likelihood
@@ -132,98 +143,36 @@ criterion = nn.ClassNLLCriterion()
 
 ----------------------------------------------------------------------
 -- get/create dataset
---
-if opt.full then
-   trsize = 50000
-   tesize = 10000
-else
-   trsize = 2000
-   tesize = 1000
+
+batches = {5,1,2,3,4}
+
+currentBatch = nil
+currentBatchIndex = 0
+
+
+function nextBatch()
+    local time = sys.clock() 
+    currentBatch = nil
+    if currentBatchIndex == #batches 
+    then
+        currentBatchIndex = 1
+    else
+        currentBatchIndex = currentBatchIndex + 1
+    end
+    batch_name = 'cifar-10-batches-t7/proc.data_batch_'..batches[currentBatchIndex]
+    print("<trainer> loading: "..batch_name)
+    currentBatch = torch.load(batch_name..'.t7', opt.format)
+    currentBatch.data = currentBatch.data:type(torch.getdefaulttensortype())
+    currentBatch.labels = currentBatch.labels:type(torch.getdefaulttensortype())
+    collectgarbage()
+    time = sys.clock() - time
+    print(string.format("<trainer> time to load batch = %.3f ms", time*1000))
+    return currentBatch
 end
 
--- download dataset
-if not paths.dirp('cifar-10-batches-t7') then
-   local www = 'http://data.neuflow.org/data/cifar-10-torch.tar.gz'
-   local tar = sys.basename(www)
-   os.execute('wget ' .. www .. '; '.. 'tar xvf ' .. tar)
-end
 
--- load dataset
-trainData = {
-   data = torch.Tensor(50000, 3072),
-   labels = torch.Tensor(50000),
-   size = function() return trsize end
-}
-for i = 0,4 do
-   subset = torch.load('cifar-10-batches-t7/data_batch_' .. (i+1) .. '.t7', 'ascii')
-   trainData.data[{ {i*10000+1, (i+1)*10000} }] = subset.data:t()
-   trainData.labels[{ {i*10000+1, (i+1)*10000} }] = subset.labels
-end
-trainData.labels = trainData.labels + 1
 
-subset = torch.load('cifar-10-batches-t7/test_batch.t7', 'ascii')
-testData = {
-   data = subset.data:t():double(),
-   labels = subset.labels[1]:double(),
-   size = function() return tesize end
-}
-testData.labels = testData.labels + 1
-
--- resize dataset (if using small version)
-trainData.data = trainData.data[{ {1,trsize} }]
-trainData.labels = trainData.labels[{ {1,trsize} }]
-
-testData.data = testData.data[{ {1,tesize} }]
-testData.labels = testData.labels[{ {1,tesize} }]
-
--- reshape data
-trainData.data = trainData.data:reshape(trsize,3,32,32)
-testData.data = testData.data:reshape(tesize,3,32,32)
-
-----------------------------------------------------------------------
--- preprocess/normalize train/test sets
---
-
-print '<trainer> preprocessing data (color space + normalization)'
-
--- preprocess trainSet
-normalization = nn.SpatialContrastiveNormalization(1, image.gaussian1D(7))
-for i = 1,trainData:size() do
-   -- rgb -> yuv
-   local rgb = trainData.data[i]
-   local yuv = image.rgb2yuv(rgb)
-   -- normalize y locally:
-   yuv[1] = normalization(yuv[{{1}}])
-   trainData.data[i] = yuv
-end
--- normalize u globally:
-mean_u = trainData.data[{ {},2,{},{} }]:mean()
-std_u = trainData.data[{ {},2,{},{} }]:std()
-trainData.data[{ {},2,{},{} }]:add(-mean_u)
-trainData.data[{ {},2,{},{} }]:div(-std_u)
--- normalize v globally:
-mean_v = trainData.data[{ {},3,{},{} }]:mean()
-std_v = trainData.data[{ {},3,{},{} }]:std()
-trainData.data[{ {},3,{},{} }]:add(-mean_v)
-trainData.data[{ {},3,{},{} }]:div(-std_v)
-
--- preprocess testSet
-for i = 1,testData:size() do
-   -- rgb -> yuv
-   local rgb = testData.data[i]
-   local yuv = image.rgb2yuv(rgb)
-   -- normalize y locally:
-   yuv[{1}] = normalization(yuv[{{1}}])
-   testData.data[i] = yuv
-end
--- normalize u globally:
-testData.data[{ {},2,{},{} }]:add(-mean_u)
-testData.data[{ {},2,{},{} }]:div(-std_u)
--- normalize v globally:
-testData.data[{ {},3,{},{} }]:add(-mean_v)
-testData.data[{ {},3,{},{} }]:div(-std_v)
-
-----------------------------------------------------------------------
+-----------------------------------------------------------------------
 -- define training and testing functions
 --
 
@@ -262,27 +211,25 @@ function display(input)
 end
 
 -- training function
-function train(dataset)
-   -- epoch tracker
-   epoch = epoch or 1
-
-   -- local vars
+function train(batch)
+    if not batch then return nil end
+      -- local vars
    local time = sys.clock()
 
    -- do one epoch
    print('<trainer> on training set:')
    print("<trainer> online epoch # " .. epoch .. ' [batchSize = ' .. opt.batchSize .. ']')
-   for t = 1,dataset:size(),opt.batchSize do
+   for t = 1,batch.data:size(1),opt.batchSize do
       -- disp progress
-      xlua.progress(t, dataset:size())
+      xlua.progress(t, batch.data:size(1))
 
       -- create mini batch
       local inputs = {}
       local targets = {}
-      for i = t,math.min(t+opt.batchSize-1,dataset:size()) do
+      for i = t,math.min(t+opt.batchSize-1,batch.data:size(1)) do
          -- load new sample
-         local input = dataset.data[i]
-         local target = dataset.labels[i]
+         local input = batch.data[i]
+         local target = batch.labels[i]
          table.insert(inputs, input)
          table.insert(targets, target)
       end
@@ -355,94 +302,112 @@ function train(dataset)
          error('unknown optimization method')
       end
    end
+   xlua.progress(batch.data:size(1), batch.data:size(1))
 
    -- time taken
    time = sys.clock() - time
-   time = time / dataset:size()
-   print("<trainer> time to learn 1 sample = " .. (time*1000) .. 'ms')
+   print(string.format("<trainer> time to learn batch = %.3f ms", time*1000))
 
    -- print confusion matrix
    --print(confusion)
    confusion:updateValids()
    trainLogger:add{['% mean class accuracy (train set)'] = confusion.totalValid * 100}
-   print('Mean Accuracy: ' .. (confusion.totalValid * 100))
+   print('<trainer> mean accuracy: ' .. (confusion.totalValid * 100)..'%')
    confusion:zero()
 
-   -- save/log current net
-   local filename = paths.concat(opt.save, 'cifar.net')
-   os.execute('mkdir -p ' .. sys.dirname(filename))
-   if sys.filep(filename) then
-      os.execute('mv ' .. filename .. ' ' .. filename .. '.old')
-   end
-   print('<trainer> saving network to '..filename)
-   torch.save(filename, model)
-
-   -- next epoch
-   epoch = epoch + 1
+   
 end
 
--- test function
-function test(dataset)
-   -- local vars
-   local time = sys.clock()
+function saveModel()
+    -- save/log current net
+    local filename = paths.concat(opt.save, 'cifar.net')
+    os.execute('mkdir -p ' .. sys.dirname(filename))
+    if sys.filep(filename) then
+      os.execute('mv ' .. filename .. ' ' .. filename .. '.old')
+    end
+    print('<trainer> saving network to '..filename)
+    torch.save(filename, model)
+end
 
-   -- averaged param use?
-   if average then
-      cachedparams = parameters:clone()
-      parameters:copy(average)
-   end
-   
+-- test functio
+function test(batch)
+    if not batch then return nil end
+    -- local vars
+    local time = sys.clock()
 
-   -- test over given dataset
-   print('<trainer> on testing Set:')
-   for t = 1,dataset:size() do
-      -- disp progress
-      xlua.progress(t, dataset:size())
+    -- averaged param use?
+    if average then
+        cachedparams = parameters:clone()
+        parameters:copy(average)
+    end
 
-      -- get new sample
-      local input = dataset.data[t]
-      local target = dataset.labels[t]
 
-      -- test sample
-      local pred = model:forward(input)
-      confusion:add(pred, target)
-   end
-    
-   -- timing
-   time = sys.clock() - time
-   time = time / dataset:size()
-   print("<trainer> time to test 1 sample = " .. (time*1000) .. 'ms')
+    -- test over given batch
+    print('<trainer> on testing set:')
+    for t = 1,batch.data:size(1) do
+        -- disp progress
+        xlua.progress(t, batch.data:size(1))
 
-   -- print confusion matrix
-   --print(confusion)
-   confusion:updateValids()
-   testLogger:add{['% mean class accuracy (test set)'] = confusion.totalValid * 100}
-   print('Mean Accuracy: ' .. (confusion.totalValid * 100))
-   confusion:zero()
+        -- get new sample
+        local input = batch.data[t]
+        local target = batch.labels[t]
 
-   -- averaged param use?
-   if average then
-      -- restore parameters
-      parameters:copy(cachedparams)
-   end
+        -- test sample
+        local pred = model:forward(input)
+        confusion:add(pred, target)
+    end
+    xlua.progress(batch.data:size(1), batch.data:size(1))
+
+    -- timing
+    time = sys.clock() - time
+    print(string.format("<trainer> time to test batch = %.3f ms", time*1000))
+    print(confusion)
+    -- visualize?
+    if opt.visualize then
+        image.display(confusion:render())
+    end
+    testLogger:add{['% mean class accuracy (test set)'] = confusion.totalValid * 100}
+    print('<trainer> mean accuracy: ' .. (confusion.totalValid * 100).."\n")
+    confusion:zero()
+
+    -- averaged param use?
+    if average then
+        -- restore parameters
+        parameters:copy(cachedparams)
+    end
 end
 
 ----------------------------------------------------------------------
-    
-   
-test(testData)
+
+-- epoch tracker
+epoch = 0
+
+test(nextBatch())
 
 while true do
+    -- next epoch
+    epoch = epoch + 1
+    if epoch >= opt.epochs then 
+        break 
+    end
+    print("\n<trainer> starting epoch # "..epoch)
     
     -- train
-    train(trainData)
-   
-    -- test
-    test(testData)
+    train(nextBatch())
+    train(nextBatch())
+    train(nextBatch())
+    train(nextBatch())
 
-   -- plot errors
-   trainLogger:style{['% mean class accuracy (train set)'] = '-'}
-   testLogger:style{['% mean class accuracy (test set)'] = '-'}
-   --trainLogger:plot()
-   --testLogger:plot()
+    -- test
+    test(nextBatch())
+    saveModel() 
+
+    -- plot errors
+    trainLogger:style{['% mean class accuracy (train set)'] = '-'}
+    testLogger:style{['% mean class accuracy (test set)'] = '-'}
+    --trainLogger:plot()
+    --testLogger:plot()
 end
+
+print "<trainer> success!"
+
