@@ -8,6 +8,17 @@ require 'nnd'
 ---[=[
 trsize = 50000
 tesize = 10000
+format = "binary"
+doubleTensor = false
+
+
+-- set tensor precision
+if doubleTensor then
+    torch.setdefaulttensortype('torch.DoubleTensor')
+else
+    torch.setdefaulttensortype('torch.FloatTensor')
+end
+print('<torch> set default Tensor type to: ' .. torch.getdefaulttensortype())
 
 -- download dataset
 if not paths.dirp('cifar-10-batches-t7') then
@@ -33,8 +44,8 @@ trainData.labels = trainData.labels + 1
 
 subset = torch.load('cifar-10-batches-t7/test_batch.t7', 'ascii')
 testData = {
-   data = subset.data:t():double(),
-   labels = subset.labels[1]:double(),
+   data = subset.data:t():type(torch.getdefaulttensortype()),
+   labels = subset.labels[1]:type(torch.getdefaulttensortype()),
 }
 testData.labels = testData.labels + 1
 
@@ -59,7 +70,7 @@ testData.data = testData.data:reshape(tesize,3,32,32)
 
 
 -- preprocess trainSet
-normalization = nn.SpatialContrastiveNormalization(1, image.gaussian1D(11))
+normalization = nn.SpatialContrastiveNormalization(1, image.gaussian1D(11):type(torch.getdefaulttensortype()))
 for i = 1,trsize do
    -- rgb -> yuv
    local rgb = trainData.data[i]
@@ -110,7 +121,7 @@ for i = 0,4 do
     }
     print("Saving: "..batch_name)
     print(subset)
-    torch.save(batch_name..'.t7', subset, 'ascii')
+    torch.save(batch_name..'.t7', subset, format)
     subset = nil
     collectgarbage()
 end
@@ -118,7 +129,7 @@ end
 batch_name = 'cifar-10-batches-t7/proc.test_batch'
 print("Saving: "..batch_name)
 print(testData)
-torch.save(batch_name..'.t7', testData, 'ascii')
+torch.save(batch_name..'.t7', testData, format)
 
 trainData = nil
 testData = nil
@@ -131,7 +142,7 @@ require "image"
 for i = 0,4 do
     batch_name = 'cifar-10-batches-t7/proc.data_batch_'..(i+1) 
     print("Printing: "..batch_name)
-    subset = torch.load(batch_name..'.t7', 'ascii')
+    subset = torch.load(batch_name..'.t7', format)
     print(subset)
     p = subset.data:transpose(2,1):reshape(3, 100, 100, 32, 32):transpose(3,4):reshape(3, 32*100, 32*100):transpose(1,2):reshape(32*100, 3*32*100)
     image.save(batch_name..'.png', p)
@@ -141,7 +152,7 @@ end
 -- write out test batch
 batch_name = 'cifar-10-batches-t7/proc.test_batch'
 print("Saving: "..batch_name)
-subset = torch.load(batch_name..'.t7', 'ascii')
+subset = torch.load(batch_name..'.t7', format)
 print(subset)
 p = subset.data:transpose(2,1):reshape(3, 100, 100, 32, 32):transpose(3,4):reshape(3, 32*100, 32*100):transpose(1,2):reshape(32*100, 3*32*100)
 image.save(batch_name..'.png', p)
