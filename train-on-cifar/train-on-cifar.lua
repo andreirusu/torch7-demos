@@ -216,21 +216,19 @@ function train(batch)
     if not batch then return nil end
       -- local vars
    local time = sys.clock()
-
+    local shuffle = torch.randperm(batch.data:size(1))
    -- do one epoch
-   print('<trainer> on training set:')
-   print("<trainer> online epoch # " .. epoch .. ' [batchSize = ' .. opt.batchSize .. ']')
-   for t = 1,batch.data:size(1),opt.batchSize do
+   for t = 1,batch.data:size(1),opt.mb do
       -- disp progress
       xlua.progress(t, batch.data:size(1))
 
       -- create mini batch
       local inputs = {}
       local targets = {}
-      for i = t,math.min(t+opt.batchSize-1,batch.data:size(1)) do
+      for i = t,math.min(t+opt.mb-1,batch.data:size(1)) do
          -- load new sample
-         local input = batch.data[i]
-         local target = batch.labels[i]
+         local input = batch.data[shuffle[i]]
+         local target = batch.labels[shuffle[i]]
          table.insert(inputs, input)
          table.insert(targets, target)
       end
