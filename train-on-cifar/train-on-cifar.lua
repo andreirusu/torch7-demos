@@ -51,6 +51,7 @@ function setup()
     cmd:option('-format', "binary", 'cached data format')
     cmd:option('-double', false, 'enable double precision')
     cmd:option('-threads', 4, 'nb of threads to use')
+    cmd:option('-test', false, 'just compute performanc on test set')
     cmd:text()
     local opt = cmd:parse(arg)
 
@@ -82,6 +83,11 @@ function setup()
         torch.setdefaulttensortype('torch.FloatTensor')
     end
     print('<torch> set default Tensor type to: ' .. torch.getdefaulttensortype())
+    
+    -- disable epochs if test mode
+    if opt.test then
+        opt.epochs = 0
+    end
 
     return opt
 end
@@ -153,22 +159,14 @@ end
 ----------------------------------------------------------------------
 -- get/create dataset
 
-batches = {5,1,2,3,4}
+batches = {5,1,2,3,4,5}
 
 currentBatch = nil
 currentBatchIndex = 0
 
 
-function nextBatch(opt)
+local function loadBatchName(batch_name, opt)
     local time = sys.clock() 
-    currentBatch = nil
-    if currentBatchIndex == #batches 
-    then
-        currentBatchIndex = 1
-    else
-        currentBatchIndex = currentBatchIndex + 1
-    end
-    batch_name = 'cifar-10-batches-t7/proc.data_batch_'..batches[currentBatchIndex]
     currentBatch = torch.load(batch_name..'.t7', opt.format)
     currentBatch.data = currentBatch.data:type(torch.getdefaulttensortype())
     currentBatch.labels = currentBatch.labels:type(torch.getdefaulttensortype())
@@ -176,6 +174,23 @@ function nextBatch(opt)
     time = sys.clock() - time
     print(string.format("<loader> new batch %s [ %.3fms ]", batch_name, time*1000))
     return currentBatch
+end
+
+function nextBatch(opt)
+    if opt.test then
+        batch_name = 'cifar-10-batches-t7/proc.test_batch'
+        return loadBatchName(batch_name, opt)
+    end
+    currentBatch = nil
+    if currentBatchIndex == #batches 
+    then
+        currentBatchIndex = 1
+    else
+        currentBatchIndex = currentBatchIndex + 1
+    end
+
+    batch_name = 'cifar-10-batches-t7/proc.data_batch_'..batches[currentBatchIndex]
+    return loadBatchName(batch_name, opt)
 end
 
 
@@ -407,6 +422,7 @@ function trainModel(model)
         print("\n<trainer> epoch # " .. epoch .. ' [mb = ' .. opt.mb .. ']')
         
         -- train model and save
+        trainOnBatch(model, nextBatch(opt))
         trainOnBatch(model, nextBatch(opt))
         trainOnBatch(model, nextBatch(opt))
         trainOnBatch(model, nextBatch(opt))
