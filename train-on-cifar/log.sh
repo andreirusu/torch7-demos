@@ -1,7 +1,8 @@
 #!/bin/bash -e 
 
+clear; cat log.txt
+
 while true ; do 
-    clear; cat log.txt
     date >> log.txt 
     for run in "$@"; do 
         echo $run >> log.txt ; 
