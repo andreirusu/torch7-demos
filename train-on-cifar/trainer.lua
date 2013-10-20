@@ -21,6 +21,7 @@ require 'nnx'
 require 'optim'
 require 'image'
 require 'nnd'
+require 'Distort'
 
 
 
@@ -50,6 +51,7 @@ function setup()
     cmd:option('-epochs', math.huge, 'maximum nb of training epochs')
     cmd:option('-format', "binary", 'cached data format')
     cmd:option('-double', false, 'enable double precision')
+    cmd:option('-distort', false, 'input distorsions; only 3D input supported')
     cmd:option('-threads', 4, 'nb of threads to use')
     cmd:option('-test', false, 'just compute performanc on test set')
     cmd:text()
@@ -86,6 +88,7 @@ function setup()
     
     -- disable epochs if test mode
     if opt.test then
+        opt.distort = false
         opt.epochs = 0
     end
 
@@ -108,13 +111,18 @@ function getModel(opt)
           -- convolutional network
           ------------------------------------------------------------
           -- stage 1 : mean+std normalization -> filter bank -> squashing -> max pooling
+          if opt.distort then 
+              net:add(nn.Distort())
+          end
           net:add(nn.SpatialConvolutionMap(nn.tables.random(3,16,1), 5, 5))
           net:add(nnd.Rectifier())
           net:add(nn.SpatialMaxPooling(2, 2, 2, 2))
+          net:add(nn.SpatialContrastiveNormalization(16, image.gaussian1D(7)))
           -- stage 2 : filter bank -> squashing -> max pooling
           net:add(nn.SpatialConvolutionMap(nn.tables.random(16, 32, 4), 5, 5))
           net:add(nnd.Rectifier())
           net:add(nn.SpatialMaxPooling(2, 2, 2, 2))
+          net:add(nn.SpatialContrastiveNormalization(32, image.gaussian1D(5)))
           -- stage 3 : standard 2-layer neural network
           net:add(nn.Reshape(32*5*5))
           net:add(nn.Linear(32*5*5, 32))
@@ -131,7 +139,7 @@ function getModel(opt)
           net:add(nn.Linear(3*32*32, 1*32*32))
           net:add(nn.Tanh())
           net:add(nn.Linear(1*32*32, #opt.classes))
-            net:add(nn.LogSoftMax())
+          net:add(nn.LogSoftMax())
           ------------------------------------------------------------
 
        elseif opt.model == 'linear' then
@@ -147,9 +155,28 @@ function getModel(opt)
           error()
        end
     else
-       print('<trainer> reloading previously trained network')
+       print('<trainer> reloading previously trained network: '..opt.network)
        model = torch.load(opt.network)
-       model.opt = opt
+        if model.opt.distort then 
+            if not opt.distort then
+                model.net:get(1):disable()
+            else
+                model.net:get(1):enable()
+            end
+        else
+            if opt.distort then
+                new = nn.Sequential()
+                new:add(nn.Distort())
+                new:add(model.net)
+                model.net = new
+            end
+        end
+        -- set new options if not in test mode
+        if opt.test then 
+           model.opt.distort = opt.distort 
+        else
+            model.opt = opt
+        end
     end
     print('<torch> model:')
     print(model) 
