@@ -8,13 +8,17 @@ require 'nn'
 
 
 function randp(lambda)
-    u = torch.rand(1000)
-    p = 1
-    k = 0
-    L = math.exp(-lambda)
+    local bsize = 10000
+    local u 
+    local p = 1
+    local k = 0
+    local L = math.exp(-lambda)
     repeat
+        if k % bsize == 0 then
+            u = torch.rand(bsize)
+        end
+        p = p * u[1 + k % bsize ]
         k = k + 1
-        p = p * u[k]
     until p < L 
     return (k-1)
 end
