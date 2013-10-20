@@ -61,7 +61,7 @@ function setup()
     opt.classes = {'airplane', 'automobile', 'bird', 'cat',
                'deer', 'dog', 'frog', 'horse', 'ship', 'truck'}
     
-    print('<trainer> options:')
+    print('<trainer> command line options:')
     print(opt)
 
 
@@ -86,10 +86,9 @@ function setup()
     end
     print('<torch> set default Tensor type to: ' .. torch.getdefaulttensortype())
     
-    -- disable epochs if test mode
+    -- test mode trumps all other options: disable distorsions if in test mode
     if opt.test then
         opt.distort = false
-        opt.epochs = 0
     end
 
     return opt
@@ -171,10 +170,13 @@ function getModel(opt)
                 model.net = new
             end
         end
-        -- set new options if not in test mode
+        -- test mode trumps all other settings; distorsions are disabled for now
         if opt.test then 
+            -- set some new options in test mode
+           model.opt.test = opt.test 
            model.opt.distort = opt.distort 
         else
+            -- set new all new options if not in test mode
             model.opt = opt
         end
     end
@@ -440,7 +442,7 @@ function trainModel(model)
     local opt = model.opt
     testOnBatch(model, nextBatch(opt))
 
-    while true do
+    while not opt.test do
         -- next epoch
         epoch = epoch + 1
         if epoch > opt.epochs then 
