@@ -76,7 +76,7 @@ function setup()
     end
 
     -- load data
-    assert(opt.loader)
+    assert(opt.loader ~= '')
     dofile(opt.loader)
 
     return opt
@@ -309,7 +309,7 @@ function trainOnBatch(model, batch)
     confusion:updateValids()
     -- time taken
     time = sys.clock() - time
-    print(string.format("<trainer> batch errors: %d / %d ( %.6f ) [ %.3fms ]", torch.sum(confusion.mat) - torch.trace(confusion.mat), torch.sum(confusion.mat) , (1 - confusion.totalValid), time*1000))
+    print(string.format("<tester> batch errors / batch size: %d / %d (%.6f) [ %.3fms ]", torch.sum(confusion.mat) - torch.trace(confusion.mat), torch.sum(confusion.mat) , (1 - confusion.totalValid), time*1000))
 
     -- print confusion matrix
     --print(confusion)
@@ -369,7 +369,7 @@ function testOnBatch(model, batch)
     
     -- timing
     time = sys.clock() - time
-    print(string.format("<tester> batch errors: %d / %d ( %.6f ) [ %.3fms ]", torch.sum(confusion.mat) - torch.trace(confusion.mat), torch.sum(confusion.mat) , (1 - confusion.totalValid), time*1000))
+    print(string.format("<tester> batch errors / batch size: %d / %d (%.6f) [ %.3fms ]", torch.sum(confusion.mat) - torch.trace(confusion.mat), torch.sum(confusion.mat) , (1 - confusion.totalValid), time*1000))
     
     -- display?
     if opt.display then
