@@ -1,26 +1,14 @@
-----------------------------------------------------------------------
--- This script shows how to train different models on the CIFAR
--- dataset, using multiple optimization techniques (SGD, ASGD, CG)
---
--- This script demonstrates a classical example of training 
--- well-known models (convnet, MLP, logistic regression)
--- on a 10-class classification problem. 
---
--- It illustrates several points:
--- 1/ description of the model
--- 2/ choice of a loss function (criterion) to minimize
--- 3/ creation of a dataset as a simple Lua table
--- 4/ description of training and test procedures
---
--- Clement Farabet
-----------------------------------------------------------------------
+---------------------------------------------------------------------------------
+----    Trainer script capable of optimizing models using the optim package  ----
+----    Original code by Clement Farabet
+---------------------------------------------------------------------------------
 
 require 'torch'
 require 'nn'
+require 'nnd'
 require 'nnx'
 require 'optim'
 require 'image'
-require 'nnd'
 require 'Distort'
 
 
@@ -39,28 +27,24 @@ function setup()
     cmd:option('-network', '', 'reload pretrained network')
     cmd:option('-model', 'convnet', 'type of model to train: convnet | mlp | linear')
     cmd:option('-display', false, 'display input data and weights during training')
-    cmd:option('-trainNoise', false, 'enable noise during training')
+    cmd:option('-loader', '', 'script which sets up the dataset batches')
+    cmd:option('-full', false, 'use all data for training')
     cmd:option('-seed', 0, 'fixed input seed for repeatable experiments')
     cmd:option('-optimization', 'SGD', 'optimization method: SGD | ASGD | CG | LBFGS')
-    cmd:option('-learningRate', 1e-2, 'learning rate at t=0')
-    cmd:option('-mb', 10, 'mini-batch size (1 = pure stochastic)')
+    cmd:option('-learningRate', 0.01, 'learning rate at t=0')
+    cmd:option('-mb', 100, 'mini-batch size (1 = pure stochastic)')
     cmd:option('-weightDecay', 0, 'weight decay (SGD only)')
     cmd:option('-momentum', 0.95, 'momentum (SGD only)')
     cmd:option('-t0', 1, 'start averaging at t0 (ASGD only), in nb of epochs')
     cmd:option('-maxIter', 5, 'maximum nb of iterations for CG and LBFGS')
-    cmd:option('-epochs', math.huge, 'maximum nb of training epochs')
+    cmd:option('-epochs', 100, 'maximum nb of training epochs')
     cmd:option('-format', "binary", 'cached data format')
     cmd:option('-double', false, 'enable double precision')
     cmd:option('-distort', false, 'input distorsions; only 3D input supported')
     cmd:option('-threads', 4, 'nb of threads to use')
-    cmd:option('-test', false, 'just compute performanc on test set')
+    cmd:option('-test', false, 'just compute error on test set')
     cmd:text()
     local opt = cmd:parse(arg)
-
-    -- 10-class problem
-    opt.classes = {'airplane', 'automobile', 'bird', 'cat',
-               'deer', 'dog', 'frog', 'horse', 'ship', 'truck'}
-    
     print('<trainer> command line options:')
     print(opt)
 
@@ -91,6 +75,10 @@ function setup()
         opt.distort = false
     end
 
+    -- load data
+    assert(opt.loader)
+    dofile(opt.loader)
+
     return opt
 end
 
@@ -105,6 +93,7 @@ function getModel(opt)
             criterion = nn.ClassNLLCriterion()
         }
         local net = model.net
+        local classes = getClassLabels()
        if opt.model == 'convnet' then
           ------------------------------------------------------------
           -- convolutional network
@@ -120,13 +109,13 @@ function getModel(opt)
           -- stage 2 : filter bank -> squashing -> max pooling
           net:add(nn.SpatialConvolutionMap(nn.tables.random(16, 32, 4), 5, 5))
           net:add(nnd.Rectifier())
-          net:add(nn.SpatialMaxPooling(2, 2, 2, 2))
+          net:add(nn.SpatialMaxPooling(2, 2, 2, 2)) 
           net:add(nn.SpatialContrastiveNormalization(32, image.gaussian1D(5)))
           -- stage 3 : standard 2-layer neural network
           net:add(nn.Reshape(32*5*5))
           net:add(nn.Linear(32*5*5, 32))
           net:add(nnd.Rectifier())
-          net:add(nn.Linear(32,#opt.classes))
+          net:add(nn.Linear(32,#classes))
             net:add(nn.LogSoftMax())
           ------------------------------------------------------------
 
@@ -137,7 +126,7 @@ function getModel(opt)
           net:add(nn.Reshape(3*32*32))
           net:add(nn.Linear(3*32*32, 1*32*32))
           net:add(nn.Tanh())
-          net:add(nn.Linear(1*32*32, #opt.classes))
+          net:add(nn.Linear(1*32*32, #classes))
           net:add(nn.LogSoftMax())
           ------------------------------------------------------------
 
@@ -146,7 +135,7 @@ function getModel(opt)
           -- simple linear model: logistic regression
           ------------------------------------------------------------
           net:add(nn.Reshape(3*32*32))
-          net:add(nn.Linear(3*32*32,#opt.classes))
+          net:add(nn.Linear(3*32*32,#classes))
             net:add(nn.LogSoftMax())
        else
           print('Unknown model type')
@@ -184,45 +173,6 @@ function getModel(opt)
     print(model) 
     return model
 end
-
-----------------------------------------------------------------------
--- get/create dataset
-
-batches = {5,1,2,3,4,5}
-
-currentBatch = nil
-currentBatchIndex = 0
-
-
-local function loadBatchName(batch_name, opt)
-    local time = sys.clock() 
-    currentBatch = torch.load(batch_name..'.t7', opt.format)
-    currentBatch.data = currentBatch.data:type(torch.getdefaulttensortype())
-    currentBatch.labels = currentBatch.labels:type(torch.getdefaulttensortype())
-    collectgarbage()
-    time = sys.clock() - time
-    print(string.format("<loader> new batch %s [ %.3fms ]", batch_name, time*1000))
-    return currentBatch
-end
-
-function nextBatch(opt)
-    if opt.test then
-        batch_name = 'cifar-10-batches-t7/proc.test_batch'
-        return loadBatchName(batch_name, opt)
-    end
-    currentBatch = nil
-    if currentBatchIndex == #batches 
-    then
-        currentBatchIndex = 1
-    else
-        currentBatchIndex = currentBatchIndex + 1
-    end
-
-    batch_name = 'cifar-10-batches-t7/proc.data_batch_'..batches[currentBatchIndex]
-    return loadBatchName(batch_name, opt)
-end
-
-
 
 -----------------------------------------------------------------------
 -- define training and testing functions
@@ -263,8 +213,9 @@ function trainOnBatch(model, batch)
     -- local vars
     local time = sys.clock()
     local opt = model.opt
+    local classes = getClassLabels()
     -- this matrix records the current confusion across classes
-    local confusion = optim.ConfusionMatrix(opt.classes)
+    local confusion = optim.ConfusionMatrix(classes)
     local shuffle = torch.randperm(batch.data:size(1))
     -- do one epoch
     for t = 1,batch.data:size(1),opt.mb do
@@ -358,11 +309,11 @@ function trainOnBatch(model, batch)
     confusion:updateValids()
     -- time taken
     time = sys.clock() - time
-    print(string.format("<trainer> batch accuracy: %.2f%%  [ %.3fms ]",confusion.totalValid * 100, time*1000))
+    print(string.format("<trainer> batch errors: %d / %d ( %.6f ) [ %.3fms ]", torch.sum(confusion.mat) - torch.trace(confusion.mat), torch.sum(confusion.mat) , (1 - confusion.totalValid), time*1000))
 
     -- print confusion matrix
     --print(confusion)
-    trainLogger:add{['% mean class accuracy (train set)'] = confusion.totalValid * 100}
+    trainLogger:add{['% mean class error (train set)'] = (1 - confusion.totalValid)}
     return model
 end
 
@@ -372,7 +323,7 @@ end
 function saveModel(model)
     local opt = model.opt
     -- save/log current net
-    local filename = paths.concat(opt.save, 'cifar.net')
+    local filename = paths.concat(opt.save, 'model.'..os.date('%Y.%m.%d-%H:%M:%S')..'.th7')
     os.execute('mkdir -p ' .. sys.dirname(filename))
     if sys.filep(filename) then
       os.execute('mv ' .. filename .. ' ' .. filename .. '.old')
@@ -388,8 +339,9 @@ function testOnBatch(model, batch)
     -- local vars
     local time = sys.clock()
     local opt = model.opt
+    local classes = getClassLabels()
     -- this matrix records the current confusion across classes
-    local confusion = optim.ConfusionMatrix(opt.classes)
+    local confusion = optim.ConfusionMatrix(classes)
     -- averaged param use?
     if average then
         cachedparams = parameters:clone()
@@ -417,13 +369,13 @@ function testOnBatch(model, batch)
     
     -- timing
     time = sys.clock() - time
-   print(string.format("<tester> batch accuracy: %.2f%%  [ %.3fms ]",confusion.totalValid * 100, time*1000))
+    print(string.format("<tester> batch errors: %d / %d ( %.6f ) [ %.3fms ]", torch.sum(confusion.mat) - torch.trace(confusion.mat), torch.sum(confusion.mat) , (1 - confusion.totalValid), time*1000))
     
     -- display?
     if opt.display then
         image.display(confusion:render())
     end
-    testLogger:add{['% mean class accuracy (test set)'] = confusion.totalValid * 100}
+    testLogger:add{['% mean class error (test set)'] = (1 - confusion.totalValid)}
 
     -- averaged param use?
     if average then
@@ -434,13 +386,20 @@ function testOnBatch(model, batch)
 end
 
 
+function run(model) 
+    local batch, test = nextBatch(model.opt)
+    if test and not model.opt.full then
+        testOnBatch(model, batch)
+    else
+        trainOnBatch(model, batch)
+    end
+end
 
-function trainModel(model)
+function apply(model)
     local time = sys.clock() 
     -- epoch tracker
     epoch = 0
     local opt = model.opt
-    testOnBatch(model, nextBatch(opt))
 
     while not opt.test do
         -- next epoch
@@ -450,20 +409,13 @@ function trainModel(model)
         end
         print("\n<trainer> epoch # " .. epoch .. ' [mb = ' .. opt.mb .. ']')
         
-        -- train model and save
-        trainOnBatch(model, nextBatch(opt))
-        trainOnBatch(model, nextBatch(opt))
-        trainOnBatch(model, nextBatch(opt))
-        trainOnBatch(model, nextBatch(opt))
-        trainOnBatch(model, nextBatch(opt))
+        -- train/test model and save
+        run(model)
         saveModel(model) 
 
-        -- test model
-        testOnBatch(model, nextBatch(opt))
-
         -- plot errors
-        trainLogger:style{['% mean class accuracy (train set)'] = '-'}
-        testLogger:style{['% mean class accuracy (test set)'] = '-'}
+        trainLogger:style{['% mean class error (train set)'] = '-'}
+        testLogger:style{['% mean class error (test set)'] = '-'}
         --trainLogger:plot()
         --testLogger:plot()
         print("<trainer> finished epoch # "..epoch.."\n")
@@ -476,7 +428,7 @@ end
 function main()
     local opt = setup()
     local model = getModel(opt)
-    trainModel(model)
+    apply(model)
 end
 
 
