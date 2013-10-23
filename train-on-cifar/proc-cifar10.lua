@@ -1,6 +1,8 @@
 require "torch"
 require "torch-env"
 require "sys"
+require "nn"
+require "nndx"
 
 ----------------------------------------------------------------------
 ----------       YUV, normalized & cached CIFAR10 loader     ---------
@@ -38,11 +40,9 @@ local function loadBatchName(batch_name, opt)
     currentBatch = torch.load(batch_name..'.t7', opt.format)
     currentBatch.data = currentBatch.data:type(torch.getdefaulttensortype())
     if opt.distort and not opt.test then 
-        local distort = nn.Distort()
+        local distort = nndx.Distort()
         local data = currentBatch.data
         for i=1,data:size(1) do
-            require "image"
-            image.display({data[i], distort:forward(data[i])})
             data[i]:copy(distort:forward(data[i]))
         end
     end
@@ -69,6 +69,4 @@ function nextBatch(opt)
     batch_name = 'cifar-10-batches-t7/proc.data_batch_'..batches[currentBatchIndex]
     return loadBatchName(batch_name, opt),  validation[batches[currentBatchIndex]]
 end
-
-
 

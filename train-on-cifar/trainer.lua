@@ -6,10 +6,9 @@
 require 'torch'
 require 'nn'
 require 'nnd'
-require 'nnx'
+require 'nndx'
 require 'optim'
 require 'image'
-require 'Distort'
 
 
 
