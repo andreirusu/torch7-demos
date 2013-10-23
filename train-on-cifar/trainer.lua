@@ -99,9 +99,6 @@ function getModel(opt)
           -- convolutional network
           ------------------------------------------------------------
           -- stage 1 : mean+std normalization -> filter bank -> squashing -> max pooling
-          if opt.distort then 
-              net:add(nn.Distort())
-          end
           net:add(nn.SpatialConvolutionMap(nn.tables.random(3,16,1), 5, 5))
           net:add(nnd.Rectifier())
           net:add(nn.SpatialMaxPooling(2, 2, 2, 2))
@@ -143,31 +140,10 @@ function getModel(opt)
           error()
        end
     else
-       print('<trainer> reloading previously trained network: '..opt.network)
-       model = torch.load(opt.network)
-        if model.opt.distort then 
-            if not opt.distort then
-                model.net:get(1):disable()
-            else
-                model.net:get(1):enable()
-            end
-        else
-            if opt.distort then
-                new = nn.Sequential()
-                new:add(nn.Distort())
-                new:add(model.net)
-                model.net = new
-            end
-        end
-        -- test mode trumps all other settings; distorsions are disabled for now
-        if opt.test then 
-            -- set some new options in test mode
-           model.opt.test = opt.test 
-           model.opt.distort = opt.distort 
-        else
-            -- set new all new options if not in test mode
-            model.opt = opt
-        end
+        print('<trainer> reloading previously trained network: '..opt.network)
+        model = torch.load(opt.network)
+        -- set new all new options if not in test mode
+        model.opt = opt
     end
     print('<torch> model:')
     print(model) 

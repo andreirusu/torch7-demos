@@ -37,6 +37,16 @@ local function loadBatchName(batch_name, opt)
     local time = sys.clock() 
     currentBatch = torch.load(batch_name..'.t7', opt.format)
     currentBatch.data = currentBatch.data:type(torch.getdefaulttensortype())
+    if opt.distort and not opt.test then 
+        local distort = nn.Distort()
+        local data = currentBatch.data
+        for i=1,data:size(1) do
+            require "image"
+            image.display({data[i], distort:forward(data[i])})
+            data[i]:copy(distort:forward(data[i]))
+        end
+    end
+
     currentBatch.labels = currentBatch.labels:type(torch.getdefaulttensortype())
     collectgarbage()
     time = sys.clock() - time
