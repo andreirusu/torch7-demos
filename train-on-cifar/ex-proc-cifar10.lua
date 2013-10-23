@@ -1,6 +1,6 @@
+require "sys"
 require "torch"
 require "torch-env"
-require "sys"
 require "nn"
 require "nndx"
 require "lanes"
@@ -33,12 +33,13 @@ local validation  = {[5] = true }
 
 
 local currentBatch = nil
+local cachedBatch = nil
+local cachedBatchIndex = 1
 local currentBatchIndex = 0
 
 
-local function loadBatchName(batch_name, opt)
-    local time = sys.clock() 
-    currentBatch = torch.load(batch_name..'.t7', opt.format)
+local function loadBatchName(batchName, opt)
+    currentBatch = torch.load(batchName..'.t7', opt.format)
     currentBatch.data = currentBatch.data:type(torch.getdefaulttensortype())
     if opt.distort and not opt.test then 
         local distort = nndx.Distort()
@@ -49,25 +50,36 @@ local function loadBatchName(batch_name, opt)
     end
 
     currentBatch.labels = currentBatch.labels:type(torch.getdefaulttensortype())
-    collectgarbage()
-    time = sys.clock() - time
-    print(string.format("<loader> new batch %s [ %.3fms ]", batch_name, time*1000))
     return currentBatch
 end
 
+cacheNextBatch = lanes.gen(function (batchName, opt)
+                                        return loadBatchName(batchName, opt)
+                                    end)
 function nextBatch(opt)
+    local time = sys.clock() 
     if opt.test then
-        batch_name = 'cifar-10-batches-t7/proc.test_batch'
-        return loadBatchName(batch_name, opt)
+        batchName = 'cifar-10-batches-t7/proc.test_batch'
+        return loadBatchName(batchName, opt)
     end
-    currentBatch = nil
-    if currentBatchIndex == #batches then
-        currentBatchIndex = 1
-    else
-        currentBatchIndex = currentBatchIndex + 1
-    end
+    
+    -- cache next batch
+    currentBatchIndex =  cachedBatchIndex
+    cachedBatchIndex = (currentBatchIndex + 1) % #batches  
+    
+    local batchName = 'cifar-10-batches-t7/proc.data_batch_'..batches[batchIndex]
+    local cachedBatchName = 'cifar-10-batches-t7/proc.data_batch_'..batches[cachedBatchIndex]
 
-    batch_name = 'cifar-10-batches-t7/proc.data_batch_'..batches[currentBatchIndex]
-    return loadBatchName(batch_name, opt),  validation[batches[currentBatchIndex]]
+    -- return cached batch if available
+    local b
+    if not cachedBatch then
+        cachedBatch = cacheNextBatch(batchName, opt)  
+    end
+    b = cachedBatch[1]
+    cachedBatch = cacheNextBatch(cachedBatchName, opt)  
+    collectgarbage()
+    time = sys.clock() - time
+    print(string.format("<loader> new batch %s [ %.3fms ]", batchName, time*1000))
+    return b,validation[batches[currentBatchIndex]]
 end
 
