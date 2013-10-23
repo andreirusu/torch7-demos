@@ -23,10 +23,10 @@ function setup()
     cmd:text()
     cmd:text('Options:')
     cmd:option('-save', fname:gsub('.lua',''), 'subdirectory to save/log experiments in')
-    cmd:option('-network', '', 'reload pretrained network')
-    cmd:option('-model', 'convnet', 'type of model to train: convnet | mlp | linear')
+    cmd:option('-load', '', 'reload model')
+    cmd:option('-model', '', 'a script implementing the interface: getModel, displayModel, saveModel')
     cmd:option('-display', false, 'display input data and weights during training')
-    cmd:option('-loader', '', 'script which sets up the dataset batches')
+    cmd:option('-data', '', 'script which sets up dataset batches returned by the nextBatch function')
     cmd:option('-full', false, 'use all data for training')
     cmd:option('-seed', 0, 'fixed input seed for repeatable experiments')
     cmd:option('-optimization', 'SGD', 'optimization method: SGD | ASGD | CG | LBFGS')
@@ -75,112 +75,17 @@ function setup()
     end
 
     -- load data
-    assert(opt.loader ~= '')
-    dofile(opt.loader)
+    assert(opt.data ~= '')
+    dofile(opt.data)
 
-    return opt
-end
-
-
-function getModel(opt)
-    local model 
-    if opt.network == '' then
-       -- define model to train
-        model = {
-            opt = opt,
-            net = nn.Sequential(),
-            criterion = nn.ClassNLLCriterion()
-        }
-        local net = model.net
-        local classes = getClassLabels()
-       if opt.model == 'convnet' then
-          ------------------------------------------------------------
-          -- convolutional network
-          ------------------------------------------------------------
-          -- stage 1 : mean+std normalization -> filter bank -> squashing -> max pooling
-          net:add(nn.SpatialConvolutionMap(nn.tables.random(3,16,1), 5, 5))
-          net:add(nnd.Rectifier())
-          net:add(nn.SpatialMaxPooling(2, 2, 2, 2))
-          net:add(nn.SpatialContrastiveNormalization(16, image.gaussian1D(7)))
-          -- stage 2 : filter bank -> squashing -> max pooling
-          net:add(nn.SpatialConvolutionMap(nn.tables.random(16, 32, 4), 5, 5))
-          net:add(nnd.Rectifier())
-          net:add(nn.SpatialMaxPooling(2, 2, 2, 2)) 
-          net:add(nn.SpatialContrastiveNormalization(32, image.gaussian1D(5)))
-          -- stage 3 : standard 2-layer neural network
-          net:add(nn.Reshape(32*5*5))
-          net:add(nn.Linear(32*5*5, 32))
-          net:add(nnd.Rectifier())
-          net:add(nn.Linear(32,#classes))
-            net:add(nn.LogSoftMax())
-          ------------------------------------------------------------
-
-       elseif opt.model == 'mlp' then
-          ------------------------------------------------------------
-          -- regular 2-layer MLP
-          ------------------------------------------------------------
-          net:add(nn.Reshape(3*32*32))
-          net:add(nn.Linear(3*32*32, 1*32*32))
-          net:add(nn.Tanh())
-          net:add(nn.Linear(1*32*32, #classes))
-          net:add(nn.LogSoftMax())
-          ------------------------------------------------------------
-
-       elseif opt.model == 'linear' then
-          ------------------------------------------------------------
-          -- simple linear model: logistic regression
-          ------------------------------------------------------------
-          net:add(nn.Reshape(3*32*32))
-          net:add(nn.Linear(3*32*32,#classes))
-            net:add(nn.LogSoftMax())
-       else
-          print('Unknown model type')
-          cmd:text()
-          error()
-       end
-    else
-        print('<trainer> reloading previously trained network: '..opt.network)
-        model = torch.load(opt.network)
-        -- set new all new options if not in test mode
-        model.opt = opt
-    end
-    print('<torch> model:')
-    print(model) 
+    -- load model script
+    assert(opt.model ~= '')
+    dofile(opt.model)
+    
+    local model = getModel(opt)
+    
     return model
 end
-
------------------------------------------------------------------------
--- define training and testing functions
---
-
-
-function display(model, input)
-    local opt = model.opt
-   iter = iter or 0
-   require 'image'
-   if iter%100 == 0 then
-      if opt.model == 'convnet' then
-         win_input = image.display{image=input, win=win_input, zoom=2, legend='input'}
-         win_w1 = image.display{image=model.net:get(1).weight, zoom=4, nrow=10,
-                                min=-1, max=1,
-                                win=win_w1, legend='stage 1: weights', padding=1}
-         win_w2 = image.display{image=model.net:get(4).weight, zoom=4, nrow=30,
-                                min=-1, max=1,
-                                win=win_w2, legend='stage 2: weights', padding=1}
-      elseif opt.model == 'mlp' then
-         local W1 = torch.Tensor(model.net:get(2).weight):resize(2048,1024)
-         win_w1 = image.display{image=W1, zoom=0.5,
-                                min=-1, max=1,
-                                win=win_w1, legend='W1 weights'}
-         local W2 = torch.Tensor(model.net:get(2).weight):resize(10,2048)
-         win_w2 = image.display{image=W2, zoom=0.5,
-                                min=-1, max=1,
-                                win=win_w2, legend='W2 weights'}
-      end
-   end
-   iter = iter + 1
-end
-
 
 
 function trainOnBatch(model, batch)
@@ -210,7 +115,7 @@ function trainOnBatch(model, batch)
 
         -- display?
         if opt.display then
-            display(model, inputs[1])
+            displayModel(model, inputs[1])
         end
     
         -- retrieve parameters and gradients
@@ -292,20 +197,6 @@ function trainOnBatch(model, batch)
     return model
 end
 
-
-
-
-function saveModel(model)
-    local opt = model.opt
-    -- save/log current net
-    local filename = paths.concat(opt.save, 'model.'..os.date('%Y.%m.%d-%H:%M:%S')..'.th7')
-    os.execute('mkdir -p ' .. sys.dirname(filename))
-    if sys.filep(filename) then
-      os.execute('mv ' .. filename .. ' ' .. filename .. '.old')
-    end
-    print('<trainer> saving network to '..filename)
-    torch.save(filename, model)
-end
 
 
 
@@ -401,8 +292,7 @@ end
 
 
 function main()
-    local opt = setup()
-    local model = getModel(opt)
+    local model = setup()
     apply(model)
 end
 

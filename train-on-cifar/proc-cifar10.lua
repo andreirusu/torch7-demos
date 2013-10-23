@@ -50,7 +50,7 @@ local function loadBatchName(batch_name, opt)
     currentBatch.labels = currentBatch.labels:type(torch.getdefaulttensortype())
     collectgarbage()
     time = sys.clock() - time
-    print(string.format("<loader> new batch %s [ %.3fms ]", batch_name, time*1000))
+    print(string.format("<data> loaded new batch %s [ %.3fms ]", batch_name, time*1000))
     return currentBatch
 end
 
