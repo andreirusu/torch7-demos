@@ -52,7 +52,7 @@ testData.labels = testData.labels + 1
 collectgarbage()
 print("Done.")
 
-print('Preprocessing data (color space + normalization)...')
+
 -- resize dataset (if using small version)
 trainData.data = trainData.data[{ {1,trsize} }]
 trainData.labels = trainData.labels[{ {1,trsize} }]
@@ -64,9 +64,33 @@ testData.labels = testData.labels[{ {1,tesize} }]
 trainData.data = trainData.data:reshape(trsize,3,32,32)
 testData.data = testData.data:reshape(tesize,3,32,32)
 
-----------------------------------------------------------------------
--- preprocess/normalize train/test sets
---
+
+--- save raw datasets 
+for i = 0,4 do
+    batch_name = 'cifar-10-batches-t7/raw.data_batch_'..(i+1) 
+    subset = {
+        data = trainData.data[{ {i*10000+1, (i+1)*10000} }]:clone(),
+        labels = trainData.labels[{ {i*10000+1, (i+1)*10000} }]:clone()
+    }
+    print("Saving: "..batch_name)
+    print(subset)
+    torch.save(batch_name..'.t7', subset, format)
+    subset = nil
+    collectgarbage()
+end
+
+batch_name = 'cifar-10-batches-t7/raw.test_batch'
+print("Saving: "..batch_name)
+print(testData)
+torch.save(batch_name..'.t7', testData, format)
+
+
+
+-----------------------------------------------------------------
+--------     preprocess/normalize train/test sets     -----------
+-----------------------------------------------------------------
+
+print('Preprocessing data (color space + normalization)...')
 
 
 -- preprocess trainSet

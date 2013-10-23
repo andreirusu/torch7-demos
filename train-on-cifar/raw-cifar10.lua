@@ -11,5 +11,5 @@ dofile('cifar10.lua')
 ----------------------  see caching script!  -------------------------
 ----------------------------------------------------------------------
 
-nextBatch = getBatchLoader('cifar-10-batches-t7/proc')
+nextBatch = getBatchLoader('cifar-10-batches-t7/raw')
 
